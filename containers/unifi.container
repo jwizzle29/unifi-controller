@@ -1,0 +1,19 @@
+[Unit]
+Description=UniFi Network Application (controller)
+After=network-online.target
+
+[Container]
+ContainerName=unifi
+Image=docker.io/linuxserver/unifi-network-application:latest
+PublishPort=8443:8443
+PublishPort=8080:8080
+PublishPort=10001:10001/udp
+Volume=/srv/unifi/data:/config:z
+EnvironmentFile=/srv/unifi/unifi.env
+AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
