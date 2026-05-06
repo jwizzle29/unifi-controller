@@ -1,0 +1,3 @@
+[Network]
+NetworkName=unifi
+Subnet=172.31.0.0/24

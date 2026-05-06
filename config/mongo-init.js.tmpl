@@ -1,0 +1,12 @@
+// Rendered by deploy.sh. Mounted into the mongo container at
+// /docker-entrypoint-initdb.d/init-mongo.js — runs once on first boot
+// of an empty MongoDB volume.
+
+db.getSiblingDB("unifi").createUser({
+  user: "unifi",
+  pwd: "${MONGO_PASS}",
+  roles: [
+    { role: "dbOwner", db: "unifi" },
+    { role: "dbOwner", db: "unifi_stat" }
+  ]
+});

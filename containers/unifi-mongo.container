@@ -1,0 +1,18 @@
+[Unit]
+Description=MongoDB for UniFi Network Application
+After=network-online.target
+
+[Container]
+ContainerName=unifi-mongo
+Image=docker.io/mongo:8.0
+Network=unifi.network
+Volume=/srv/unifi/mongo-data:/data/db:z
+Volume=/srv/unifi/mongo-init.js:/docker-entrypoint-initdb.d/init-mongo.js:ro,z
+EnvironmentFile=/srv/unifi/mongo.env
+AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

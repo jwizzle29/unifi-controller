@@ -1,10 +1,12 @@
 [Unit]
 Description=UniFi Network Application (controller)
-After=network-online.target
+After=network-online.target unifi-mongo.service
+Requires=unifi-mongo.service
 
 [Container]
 ContainerName=unifi
 Image=docker.io/linuxserver/unifi-network-application:latest
+Network=unifi.network
 PublishPort=8443:8443
 PublishPort=8080:8080
 PublishPort=10001:10001/udp

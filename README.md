@@ -12,6 +12,10 @@ to the controller; the controller pushes config to them and shows stats.
 | Container | Image | Role |
 |---|---|---|
 | unifi | `linuxserver/unifi-network-application:latest` | Controller (web UI + AP management) |
+| unifi-mongo | `mongo:8.0` | MongoDB backing store (UniFi 8+ requires external Mongo) |
+
+The two containers share a podman network (`unifi`, `172.31.0.0/24`) so
+the controller can reach the database by container name.
 
 ## Layout
 
@@ -20,15 +24,31 @@ to the controller; the controller pushes config to them and shows stats.
 ├── deploy.sh
 ├── .env.example
 ├── containers/
+│   ├── unifi.network
+│   ├── unifi-mongo.container
 │   └── unifi.container
+├── config/
+│   └── mongo-init.js.tmpl
 └── README.md
 ```
 
 On the host after deploy:
 
 ```
-/srv/unifi/data/                    # MongoDB + controller config
-/etc/containers/systemd/unifi.container -> /srv/unifi/unifi.container
+/srv/unifi/
+├── unifi.network                              (symlinked into systemd)
+├── unifi-mongo.container                      (symlinked)
+├── unifi.container                            (symlinked)
+├── mongo.env                                  (root password)
+├── unifi.env                                  (PUID/PGID/TZ + MONGO_*)
+├── mongo-init.js                              (rendered, creates unifi user)
+├── data/                                      (controller config)
+└── mongo-data/                                (MongoDB data files)
+
+/etc/containers/systemd/
+├── unifi.network          -> /srv/unifi/unifi.network
+├── unifi-mongo.container  -> /srv/unifi/unifi-mongo.container
+└── unifi.container        -> /srv/unifi/unifi.container
 ```
 
 ## Ports
