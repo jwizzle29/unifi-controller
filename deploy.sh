@@ -6,8 +6,8 @@
 #   sudo ./deploy.sh
 #
 # Idempotent: re-running re-installs quadlets, refreshes envs, restarts
-# the units. Container data persists in /srv/unifi/{data,mongo-data}
-# across runs.
+# the units, ensures the unifi mongo user exists. Container data persists
+# in /srv/unifi/{data,mongo-data} across runs.
 #
 # Reads .env at the repo root for PUID, PGID, TZ. Generates MONGO_PASS
 # on first run and persists it back to .env.
@@ -25,7 +25,7 @@ QUADLET_DIR="/etc/containers/systemd"
 
 [[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE (cp .env.example .env)" >&2; exit 1; }
 
-for cmd in podman openssl envsubst; do
+for cmd in podman openssl; do
     command -v "$cmd" >/dev/null 2>&1 || { echo "missing: $cmd" >&2; exit 1; }
 done
 
@@ -45,12 +45,8 @@ fi
 echo "==> creating /srv/unifi layout"
 mkdir -p /srv/unifi/data /srv/unifi/mongo-data
 
-echo "==> rendering mongo init script"
-umask 077
-export MONGO_PASS
-envsubst '${MONGO_PASS}' < "$REPO_DIR/config/mongo-init.js.tmpl" > /srv/unifi/mongo-init.js
-
 echo "==> writing /srv/unifi/mongo.env"
+umask 077
 cat > /srv/unifi/mongo.env <<EOF
 MONGO_INITDB_ROOT_USERNAME=root
 MONGO_INITDB_ROOT_PASSWORD=$MONGO_PASS
@@ -81,11 +77,57 @@ ln -sfn /srv/unifi/unifi.container        "$QUADLET_DIR/unifi.container"
 
 systemctl daemon-reload
 
-echo "==> starting services"
-# Quadlet-generated units can't be `enable`d (they're transient).
-# Auto-start at boot is handled by [Install] in each .container file.
+echo "==> starting unifi-mongo"
+# Stop unifi while we set up mongo so it doesn't keep failing during the window.
+systemctl stop unifi.service 2>/dev/null || true
 systemctl restart unifi-mongo.service
-sleep 5
+
+echo "==> waiting for mongo to accept auth"
+for i in $(seq 1 60); do
+    if podman exec unifi-mongo mongosh --quiet \
+        -u root -p "$MONGO_PASS" --authenticationDatabase admin \
+        --eval 'db.runCommand({ping:1})' >/dev/null 2>&1; then
+        echo "    mongo ready after ${i}s"
+        break
+    fi
+    sleep 1
+    if [[ $i -eq 60 ]]; then
+        echo "ERROR: mongo not responding after 60s — check 'sudo journalctl -u unifi-mongo'" >&2
+        exit 1
+    fi
+done
+
+echo "==> ensuring unifi mongo user exists"
+podman exec -i unifi-mongo mongosh --quiet \
+    -u root -p "$MONGO_PASS" --authenticationDatabase admin <<EOF
+use unifi
+try {
+  db.createUser({
+    user: "unifi",
+    pwd: "$MONGO_PASS",
+    roles: [
+      { role: "dbOwner", db: "unifi" },
+      { role: "dbOwner", db: "unifi_stat" }
+    ]
+  });
+  print("created unifi user");
+} catch (e) {
+  if (e.codeName === "DuplicateKey" || /already exists/i.test(e.message)) {
+    db.updateUser("unifi", {
+      pwd: "$MONGO_PASS",
+      roles: [
+        { role: "dbOwner", db: "unifi" },
+        { role: "dbOwner", db: "unifi_stat" }
+      ]
+    });
+    print("updated unifi user (was already present)");
+  } else {
+    throw e;
+  }
+}
+EOF
+
+echo "==> starting unifi.service"
 systemctl restart unifi.service
 
 cat <<EOF
@@ -97,8 +139,7 @@ cat <<EOF
   Logs:       sudo journalctl -u unifi -u unifi-mongo -f
   Status:     systemctl status unifi unifi-mongo
 
-First-run takes 1-3 min while MongoDB initializes and the controller
-schema deploys. Then:
+First-run takes 1-3 min while the controller schema deploys. Then:
   1. Open the web UI above
   2. Skip the cloud sign-in, use local admin
   3. Adopt the AP from "Pending Adoption"
